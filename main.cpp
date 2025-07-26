@@ -213,12 +213,11 @@ enum class UpdateState {
  */
 class Device {
 public:
-    // All public data members grouped together
+    // All public data members grouped together first
     const uint32_t device_id{next_id_++}; // In-class initializer
     const DeviceType type;
     const std::string name;
     const double update_speed_factor; // Speed multiplier for this device type
-    
     std::atomic<UpdateState> current_state{UpdateState::IDLE};
     FirmwareVersion current_version;
     FirmwareVersion previous_version; // For rollback
@@ -743,8 +742,8 @@ private:
         
         auto start_time = std::chrono::steady_clock::now();
         while (true) {
-            // Clear screen using proper bounded syntax for escape sequences
-            std::cout << "\033[2J\033[H"; // Fixed: proper bounded syntax
+            // Clear screen using bounded syntax for escape sequences
+            std::cout << "\x1b[2J\x1b[H"; // Fixed: bounded syntax using \x1b
             
             auto current_time = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
