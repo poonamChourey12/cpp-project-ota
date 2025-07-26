@@ -761,7 +761,8 @@ private:
             
             // Check for user input (non-blocking simulation)
             std::this_thread::sleep_for(std::chrono::seconds(2));
-            std::cout << "\x1b[2J\x1b[1;1H";
+            std::cout << "\033[2J\033[1;1H";
+
             // Simple break condition (in real implementation, use non-blocking input)
             if (elapsed.count() > 30) {
                 std::cout << "Monitor timeout reached. Press Enter to continue...";
