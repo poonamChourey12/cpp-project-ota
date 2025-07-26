@@ -20,14 +20,11 @@
 #include <numeric>
 #include <functional>
 #include <limits>
-
 namespace ota_simulator {
-
 // Forward declarations
 class Device;
 class OTAManager;
 enum class UpdateState;
-
 /**
  * Custom transparent hasher for string-like types
  * @intuition: Enable heterogeneous lookups to avoid temporary string allocations
@@ -38,7 +35,7 @@ struct TransparentStringHash {
     using is_transparent = void;
     
     [[nodiscard]] constexpr size_t operator()(std::string_view sv) const noexcept {
-        return st>{}(sv);
+        return std::hash<std::string_view>{}(sv);
     }
     
     [[nodiscard]] constexpr size_t operator()(const std::string& s) const noexcept {
@@ -49,7 +46,6 @@ struct TransparentStringHash {
         return std::hash<std::string_view>{}(s);
     }
 };
-
 /**
  * Semantic versioning with rollback capability support
  * @intuition: Need structured version comparison for update eligibility and rollback decisions
@@ -79,7 +75,6 @@ struct FirmwareVersion {
         return version;
     }
 };
-
 /**
  * Represents a firmware package with metadata and content
  * @intuition: Bundle version info with actual firmware data for complete package management
@@ -113,7 +108,6 @@ struct FirmwarePackage {
         return calculated == checksum;
     }
 };
-
 /**
  * Manages chunk-based firmware download with failure simulation
  * @intuition: Break large firmware into manageable chunks to simulate real network conditions
@@ -170,13 +164,11 @@ public:
     [[nodiscard]] static constexpr size_t calculate_total_chunks(size_t total_size) noexcept {
         return total_size == 0 ? 0 : (total_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
     }
-
 private:
     // All private data members grouped together
     static constexpr size_t CHUNK_SIZE = 4096; // 4KB chunks
     mutable std::mt19937 rng_{std::random_device{}()};
 };
-
 /**
  * Device types with different characteristics and update behaviors
  * @intuition: Different IoT devices have varying capabilities and update requirements
@@ -188,7 +180,6 @@ enum class DeviceType {
     GATEWAY_HIGH_PERFORMANCE,
     ACTUATOR_REAL_TIME
 };
-
 /**
  * Update workflow states for comprehensive status tracking
  * @intuition: Clear state machine for update process monitoring and error handling
@@ -207,7 +198,6 @@ enum class UpdateState {
     ROLLED_BACK,
     RECOVERY_MODE
 };
-
 /**
  * Complete device representation with update capabilities
  * @intuition: Model real IoT devices with unique characteristics and update history
@@ -216,23 +206,13 @@ enum class UpdateState {
  */
 class Device {
 public:
-    // ALL public data members grouped together first
-    const uint32_t device_id{next_id_++};
-    const DeviceType type;
-    const std::string name;
-    const double update_speed_factor;
-    std::atomic<UpdateState> current_state{UpdateState::IDLE};
-    FirmwareVersion current_version;
-    FirmwareVersion previous_version;
-    std::unique_ptr<FirmwarePackage> staged_firmware;
-    
     // ALL public methods grouped together
     Device(DeviceType device_type, std::string device_name, FirmwareVersion initial_version)
-        : type(device_type), name(std::move(device_name)),
-          update_speed_factor(get_speed_factor(device_type)),
-          current_version(initial_version), previous_version(initial_version) {
+        : type_(device_type), name_(std::move(device_name)),
+          update_speed_factor_(get_speed_factor(device_type)),
+          current_version_(initial_version), previous_version_(initial_version) {
         log_event(std::format("Device {} initialized with firmware {}", 
-                             name, current_version.to_string()));
+                             name_, current_version_.to_string()));
     }
     
     void log_event(const std::string& event) {
@@ -259,48 +239,77 @@ public:
     }
     
     [[nodiscard]] bool can_update_to(const FirmwareVersion& target_version) const {
-        return target_version > current_version;
+        return target_version > current_version_;
     }
     
     void stage_firmware(std::unique_ptr<FirmwarePackage> package) {
-        staged_firmware = std::move(package);
+        staged_firmware_ = std::move(package);
         log_event(std::format("Firmware {} staged for installation", 
-                             staged_firmware->version.to_string()));
+                             staged_firmware_->version.to_string()));
     }
     
     [[nodiscard]] bool install_staged_firmware() {
-        if (!staged_firmware || !staged_firmware->verify_integrity()) {
+        if (!staged_firmware_ || !staged_firmware_->verify_integrity()) {
             log_event("Installation failed: Invalid or corrupted staged firmware");
             return false;
         }
         
-        previous_version = current_version;
-        current_version = staged_firmware->version;
-        staged_firmware.reset();
+        previous_version_ = current_version_;
+        current_version_ = staged_firmware_->version;
+        staged_firmware_.reset();
         
         log_event(std::format("Successfully installed firmware {}", 
-                             current_version.to_string()));
+                             current_version_.to_string()));
         return true;
     }
     
     void rollback() {
-        if (previous_version == current_version) {
+        if (previous_version_ == current_version_) {
             log_event("Rollback skipped: No previous version available");
             return;
         }
         
-        auto temp = current_version;
-        current_version = previous_version;
-        previous_version = temp;
+        auto temp = current_version_;
+        current_version_ = previous_version_;
+        previous_version_ = temp;
         
         log_event(std::format("Rolled back to firmware {}", 
-                             current_version.to_string()));
+                             current_version_.to_string()));
     }
+
+    [[nodiscard]] bool verify_staged_firmware() const {
+        return staged_firmware_ && staged_firmware_->verify_integrity();
+    }
+
+    [[nodiscard]] uint32_t device_id() const { return device_id_; }
+    [[nodiscard]] DeviceType type() const { return type_; }
+    [[nodiscard]] const std::string& name() const { return name_; }
+    [[nodiscard]] double update_speed_factor() const { return update_speed_factor_; }
+    [[nodiscard]] UpdateState current_state() const { return current_state_.load(); }
+    [[nodiscard]] const FirmwareVersion& current_version() const { return current_version_; }
+    [[nodiscard]] const FirmwareVersion& previous_version() const { return previous_version_; }
+
+    void set_state(UpdateState state) { current_state_ = state; }
 
 private:
     // ALL private data members grouped together
     static inline std::atomic<uint32_t> next_id_{1000};
+    
+    const uint32_t device_id_{next_id_++};
+    const DeviceType type_;
+    const std::string name_;
+    const double update_speed_factor_;
+    
+    std::atomic<UpdateState> current_state_{UpdateState::IDLE};
+    
+    FirmwareVersion current_version_;
+    
+    FirmwareVersion previous_version_;
+    
+    std::unique_ptr<FirmwarePackage> staged_firmware_;
+    
     mutable std::mutex state_mutex_;
+    
     std::vector<std::string> update_log_;
     
     // ALL private methods grouped together
@@ -314,7 +323,6 @@ private:
         return 1.0;
     }
 };
-
 /**
  * Comprehensive OTA update management system
  * @intuition: Centralized coordinator for all update operations with queue management
@@ -333,7 +341,7 @@ public:
     
     void add_device(std::unique_ptr<Device> device) {
         std::lock_guard lock(manager_mutex_);
-        auto device_id = device->device_id;
+        auto device_id = device->device_id();
         devices_[device_id] = std::move(device);
         std::cout << std::format("Device {} added to OTA manager\n", device_id);
     }
@@ -368,7 +376,7 @@ public:
             return false;
         }
         
-        device->current_state = UpdateState::QUEUED;
+        device->set_state(UpdateState::QUEUED);
         update_queue_.push(device_id);
         queue_cv_.notify_one();
         
@@ -388,10 +396,10 @@ public:
         
         const auto& device = device_it->second; // const reference
         device->rollback();
-        device->current_state = UpdateState::ROLLED_BACK;
+        device->set_state(UpdateState::ROLLED_BACK);
         
         std::cout << std::format("Device {} rolled back to firmware {}\n", 
-                                device_id, device->current_version.to_string());
+                                device_id, device->current_version().to_string());
     }
     
     [[nodiscard]] std::vector<Device*> list_devices() const {
@@ -416,11 +424,11 @@ public:
         
         for (const auto& [id, device] : devices_) {
             std::cout << std::format("{:<8} {:<20} {:<15} {:<12} {:<10}\n",
-                device->device_id,
-                device->name,
-                device_type_to_string(device->type),
-                device->current_version.to_string(),
-                update_state_to_string(device->current_state.load())
+                device->device_id(),
+                device->name(),
+                device_type_to_string(device->type()),
+                device->current_version().to_string(),
+                update_state_to_string(device->current_state())
             );
         }
         std::cout << "\n";
@@ -465,7 +473,7 @@ private:
     void perform_update(Device& device) {
         using enum UpdateState; // Reduce verbosity
         
-        device.current_state = DOWNLOADING;
+        device.set_state(DOWNLOADING);
         device.log_event("Starting OTA update");
         
         // Find target firmware (assume highest version for simplicity)
@@ -474,69 +482,69 @@ private:
         FirmwareVersion highest_version{0, 0, 0};
         
         for (const auto& [version_str, package] : firmware_repository_) {
-            if (package->version > device.current_version && package->version > highest_version) {
+            if (package->version > device.current_version() && package->version > highest_version) {
                 highest_version = package->version;
                 target_firmware = package.get();
             }
         }
         
         if (!target_firmware) {
-            device.current_state = FAILED;
+            device.set_state(FAILED);
             device.log_event("No suitable firmware found for update");
             return;
         }
         
         // Simulate chunked download with potential failures
         if (!download_firmware_chunked(device, *target_firmware)) {
-            device.current_state = FAILED;
+            device.set_state(FAILED);
             return;
         }
         
         // Verification phase
-        device.current_state = VERIFYING;
+        device.set_state(VERIFYING);
         device.log_event("Verifying downloaded firmware");
         
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         
-        if (!device.staged_firmware->verify_integrity()) {
-            device.current_state = FAILED;
+        if (!device.verify_staged_firmware()) {
+            device.set_state(FAILED);
             device.log_event("Firmware verification failed");
             return;
         }
         
         // Installation phase
-        device.current_state = INSTALLING;
+        device.set_state(INSTALLING);
         device.log_event("Installing firmware");
         
         // Use init-statement for power_failure_dis
         if (std::uniform_real_distribution power_failure_dis(0.0, 1.0);
             power_failure_dis(rng_) < 0.05) { // 5% chance of power failure
-            device.current_state = RECOVERY_MODE;
+            device.set_state(RECOVERY_MODE);
             device.log_event("Power failure during installation - entering recovery mode");
             
             // Simulate recovery process
             std::this_thread::sleep_for(std::chrono::seconds(2));
             device.rollback();
-            device.current_state = ROLLED_BACK;
+            device.set_state(ROLLED_BACK);
             return;
         }
         
         std::this_thread::sleep_for(std::chrono::milliseconds(
-            static_cast<int>(1000 / device.update_speed_factor)));
+            static_cast<int>(1000 / device.update_speed_factor())));
         
         if (!device.install_staged_firmware()) {
-            device.current_state = FAILED;
+            device.set_state(FAILED);
             return;
         }
         
         // Reboot simulation
-        device.current_state = REBOOTING;
+        device.set_state(REBOOTING);
         device.log_event("Rebooting device");
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         
-        device.current_state = SUCCESS;
+        device.set_state(SUCCESS);
         device.log_event(std::format("OTA update completed successfully to version {}", 
-                                   device.current_version.to_string()));
+                                   device.current_version().to_string()));
     }
     
     [[nodiscard]] bool download_firmware_chunked(Device& device, const FirmwarePackage& firmware) const {
@@ -612,7 +620,6 @@ private:
         return "Unknown";
     }
 };
-
 /**
  * Command-line interface for interactive OTA management
  * @intuition: Provide real-time monitoring and control capabilities for update operations
@@ -682,7 +689,7 @@ private:
         
         auto devices = ota_manager_.list_devices();
         auto device_it = std::ranges::find_if(devices, 
-            [device_id](const Device* d) { return d->device_id == device_id; });
+            [device_id](const Device* d) { return d->device_id() == device_id; });
         
         if (device_it == devices.end()) {
             std::cout << "Device not found.\n";
@@ -691,11 +698,11 @@ private:
         
         const auto& device = **device_it;
         std::cout << std::format("\n=== Device {} Details ===\n", device_id);
-        std::cout << std::format("Name: {}\n", device.name);
-        std::cout << std::format("Type: {}\n", device_type_to_string(device.type));
-        std::cout << std::format("Current Version: {}\n", device.current_version.to_string());
-        std::cout << std::format("Previous Version: {}\n", device.previous_version.to_string());
-        std::cout << std::format("Current State: {}\n", update_state_to_string(device.current_state.load()));
+        std::cout << std::format("Name: {}\n", device.name());
+        std::cout << std::format("Type: {}\n", device_type_to_string(device.type()));
+        std::cout << std::format("Current Version: {}\n", device.current_version().to_string());
+        std::cout << std::format("Previous Version: {}\n", device.previous_version().to_string());
+        std::cout << std::format("Current State: {}\n", update_state_to_string(device.current_state()));
         
         std::cout << "\nRecent Log Entries:\n";
         auto logs = device.get_recent_logs(5);
@@ -824,9 +831,7 @@ private:
         return "Unknown State";
     }
 };
-
 } // namespace ota_simulator
-
 /**
  * Application entry point with complete OTA simulation setup
  * @intuition: Initialize system components and provide interactive experience
