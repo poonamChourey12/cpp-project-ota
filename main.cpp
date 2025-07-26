@@ -751,7 +751,7 @@ private:
         auto start_time = std::chrono::steady_clock::now();
         while (true) {
             // Clear screen using bounded hex escape sequences
-            std::cout << "\x1b[2J\x1b[H";
+            
             
             auto current_time = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
@@ -761,7 +761,7 @@ private:
             
             // Check for user input (non-blocking simulation)
             std::this_thread::sleep_for(std::chrono::seconds(2));
-            
+            std::cout << "\x1b[2J\x1b[1;1H";
             // Simple break condition (in real implementation, use non-blocking input)
             if (elapsed.count() > 30) {
                 std::cout << "Monitor timeout reached. Press Enter to continue...";
