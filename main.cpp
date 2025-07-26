@@ -192,7 +192,7 @@ private:
     std::vector<std::string> update_log_;
     
 public:
-    const uint32_t device_id;
+    const uint32_t device_id{next_id_++};  // In-class initializer
     const DeviceType type;
     const std::string name;
     const double update_speed_factor; // Speed multiplier for this device type
@@ -203,7 +203,7 @@ public:
     std::unique_ptr<FirmwarePackage> staged_firmware;
     
     Device(DeviceType device_type, std::string device_name, FirmwareVersion initial_version)
-        : device_id(next_id_++), type(device_type), name(std::move(device_name)),
+        : type(device_type), name(std::move(device_name)),
           update_speed_factor(get_speed_factor(device_type)),
           current_version(initial_version), previous_version(initial_version) {
         log_event(std::format("Device {} initialized with firmware {}", 
