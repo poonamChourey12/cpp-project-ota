@@ -18,6 +18,7 @@
 #include <sstream>
 #include <cassert>
 #include <numeric>
+#include <functional>
 
 namespace ota_simulator {
 
@@ -25,6 +26,28 @@ namespace ota_simulator {
 class Device;
 class OTAManager;
 enum class UpdateState;
+
+/**
+ * Custom transparent hasher for string-like types
+ * @intuition: Enable heterogeneous lookups to avoid temporary string allocations
+ * @approach: Hash both string and string_view types transparently using same algorithm
+ * @complexity: Time O(n) where n is string length, Space O(1)
+ */
+struct TransparentStringHash {
+    using is_transparent = void;
+    
+    [[nodiscard]] constexpr size_t operator()(std::string_view sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+    
+    [[nodiscard]] constexpr size_t operator()(const std::string& s) const noexcept {
+        return std::hash<std::string_view>{}(s);
+    }
+    
+    [[nodiscard]] constexpr size_t operator()(const char* s) const noexcept {
+        return std::hash<std::string_view>{}(s);
+    }
+};
 
 /**
  * Semantic versioning with rollback capability support
@@ -99,7 +122,7 @@ struct FirmwarePackage {
 class ChunkedDownloader {
 private:
     static constexpr size_t CHUNK_SIZE = 4096; // 4KB chunks
-    std::mt19937 rng_{std::random_device{}()};
+    mutable std::mt19937 rng_{std::random_device{}()};
     
 public:
     struct DownloadResult {
@@ -112,7 +135,7 @@ public:
     [[nodiscard]] DownloadResult download_chunk(
         const FirmwarePackage& package, 
         size_t chunk_index,
-        double failure_rate = 0.1) {
+        double failure_rate = 0.1) const { // Made const
         
         DownloadResult result;
         
@@ -188,12 +211,8 @@ enum class UpdateState {
  * @complexity: Time O(1) for most operations, Space O(log_entries)
  */
 class Device {
-private:
-    static inline std::atomic<uint32_t> next_id_{1000};
-    mutable std::mutex state_mutex_;
-    std::vector<std::string> update_log_;
-    
 public:
+    // Public members grouped together
     const uint32_t device_id{next_id_++}; // In-class initializer
     const DeviceType type;
     const std::string name;
@@ -277,6 +296,11 @@ public:
     }
     
 private:
+    // Private members grouped together
+    static inline std::atomic<uint32_t> next_id_{1000};
+    mutable std::mutex state_mutex_;
+    std::vector<std::string> update_log_;
+    
     [[nodiscard]] static constexpr double get_speed_factor(DeviceType type) {
         using enum DeviceType; // Reduce verbosity
         switch (type) {
@@ -295,28 +319,13 @@ private:
  * @complexity: Time O(n*m) where n=devices, m=chunks per update, Space O(devices + queued_updates)
  */
 class OTAManager {
-private:
-    std::unordered_map<uint32_t, std::unique_ptr<Device>> devices_;
-    std::unordered_map<std::string, std::unique_ptr<FirmwarePackage>> firmware_repository_;
-    std::queue<uint32_t> update_queue_;
-    
-    mutable std::mutex manager_mutex_;
-    std::condition_variable queue_cv_;
-    std::atomic<bool> running_{true};
-    std::thread worker_thread_;
-    
-    ChunkedDownloader downloader_;
-    std::mt19937 rng_{std::random_device{}()};
-    
 public:
     OTAManager() : worker_thread_(&OTAManager::update_worker, this) {}
     
     ~OTAManager() {
         running_ = false;
         queue_cv_.notify_all();
-        if (worker_thread_.joinable()) {
-            worker_thread_.join();
-        }
+        // std::jthread automatically joins on destruction
     }
     
     void add_device(std::unique_ptr<Device> device) {
@@ -415,6 +424,19 @@ public:
     }
     
 private:
+    std::unordered_map<uint32_t, std::unique_ptr<Device>> devices_;
+    std::unordered_map<std::string, std::unique_ptr<FirmwarePackage>, 
+                      TransparentStringHash, std::equal_to<>> firmware_repository_; // Transparent hasher
+    std::queue<uint32_t> update_queue_;
+    
+    mutable std::mutex manager_mutex_;
+    std::condition_variable queue_cv_;
+    std::atomic<bool> running_{true};
+    std::jthread worker_thread_; // Use std::jthread instead of std::thread
+    
+    ChunkedDownloader downloader_;
+    mutable std::mt19937 rng_{std::random_device{}()};
+    
     void update_worker() {
         while (running_) {
             std::unique_lock lock(manager_mutex_);
@@ -445,7 +467,7 @@ private:
         
         // Find target firmware (assume highest version for simplicity)
         std::lock_guard lock(manager_mutex_);
-        FirmwarePackage* target_firmware = nullptr;
+        const FirmwarePackage* target_firmware = nullptr; // pointer-to-const
         FirmwareVersion highest_version{0, 0, 0};
         
         for (const auto& [version_str, package] : firmware_repository_) {
@@ -483,9 +505,9 @@ private:
         device.current_state = INSTALLING;
         device.log_event("Installing firmware");
         
-        // Simulate power failure during installation
-        std::uniform_real_distribution power_failure_dis(0.0, 1.0);
-        if (power_failure_dis(rng_) < 0.05) { // 5% chance of power failure
+        // Use init-statement for power_failure_dis
+        if (std::uniform_real_distribution power_failure_dis(0.0, 1.0);
+            power_failure_dis(rng_) < 0.05) { // 5% chance of power failure
             device.current_state = RECOVERY_MODE;
             device.log_event("Power failure during installation - entering recovery mode");
             
@@ -595,10 +617,6 @@ private:
  * @complexity: Time O(1) per command, Space O(command_history)
  */
 class CLI {
-private:
-    OTAManager& ota_manager_;
-    bool running_{true};
-    
 public:
     explicit CLI(OTAManager& manager) : ota_manager_(manager) {}
     
@@ -613,7 +631,10 @@ public:
     }
     
 private:
-    void print_menu() {
+    OTAManager& ota_manager_;
+    bool running_{true};
+    
+    void print_menu() const { // Made const
         std::cout << "\nAvailable Commands:\n";
         std::cout << "1. List devices\n";
         std::cout << "2. Show device details\n";
@@ -646,7 +667,7 @@ private:
         }
     }
     
-    void show_device_details() {
+    void show_device_details() const { // Made const
         std::cout << "Enter device ID: ";
         uint32_t device_id;
         if (!(std::cin >> device_id)) {
@@ -680,7 +701,7 @@ private:
         }
     }
     
-    void queue_update_interactive() {
+    void queue_update_interactive() const { // Made const
         std::cout << "Enter device ID: ";
         uint32_t device_id;
         if (!(std::cin >> device_id)) {
@@ -701,7 +722,7 @@ private:
         [[maybe_unused]] auto result = ota_manager_.queue_update(device_id, target_version);
     }
     
-    void rollback_device_interactive() {
+    void rollback_device_interactive() const { // Made const
         std::cout << "Enter device ID to rollback: ";
         uint32_t device_id;
         if (!(std::cin >> device_id)) {
@@ -714,13 +735,13 @@ private:
         ota_manager_.rollback_device(device_id);
     }
     
-    void monitor_updates() {
+    void monitor_updates() const { // Made const
         std::cout << "Monitoring updates (press Enter to stop)...\n";
         
         auto start_time = std::chrono::steady_clock::now();
         while (true) {
             // Clear screen using bounded syntax
-            std::cout << "\x1B[2J\x1B[H";
+            std::cout << "\u001B[2J\u001B[H"; // Bounded syntax for escape sequences
             
             auto current_time = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
@@ -741,7 +762,7 @@ private:
         }
     }
     
-    void add_test_devices() {
+    void add_test_devices() const { // Made const
         using enum DeviceType; // Reduce verbosity
         
         // Add sample devices and firmware for testing
