@@ -38,7 +38,7 @@ struct TransparentStringHash {
     using is_transparent = void;
     
     [[nodiscard]] constexpr size_t operator()(std::string_view sv) const noexcept {
-        return st>{}(sv);
+        return std::hash<std::string_view>{}(sv);
     }
     
     [[nodiscard]] constexpr size_t operator()(const std::string& s) const noexcept {
@@ -216,8 +216,8 @@ enum class UpdateState {
  */
 class Device {
 public:
-    // ALL public data members grouped together first
-    const uint32_t device_id{next_id_++};
+    // ALL public data members grouped together (no cross-dependencies)
+    const uint32_t device_id; // Fixed: Removed in-class initialization
     const DeviceType type;
     const std::string name;
     const double update_speed_factor;
@@ -228,9 +228,12 @@ public:
     
     // ALL public methods grouped together
     Device(DeviceType device_type, std::string device_name, FirmwareVersion initial_version)
-        : type(device_type), name(std::move(device_name)),
+        : device_id(next_id_++), // Fixed: Initialize here instead of in-class
+          type(device_type), 
+          name(std::move(device_name)),
           update_speed_factor(get_speed_factor(device_type)),
-          current_version(initial_version), previous_version(initial_version) {
+          current_version(initial_version), 
+          previous_version(initial_version) {
         log_event(std::format("Device {} initialized with firmware {}", 
                              name, current_version.to_string()));
     }
@@ -739,28 +742,28 @@ private:
     }
     
     void monitor_updates() const {
-    std::cout << "Monitoring updates (press Enter to stop)...\n";
-    
-    auto start_time = std::chrono::steady_clock::now();
-    while (true) {
-        // Clear screen using proper bounded octal syntax for escape sequences
-        std::cout << "\033[2J\033[H"; // Fixed: bounded octal syntax
+        std::cout << "Monitoring updates (press Enter to stop)...\n";
         
-        auto current_time = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
-        
-        std::cout << std::format("=== Live Update Monitor ({}s) ===\n", elapsed.count());
-        ota_manager_.print_device_status();
-        
-        // Check for user input (non-blocking simulation)
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        
-        // Simple break condition
-        if (elapsed.count() > 30) {
-            std::cout << "Monitor timeout reached. Press Enter to continue...";
-            std::cin.ignore();
-            std::cin.get();
-            break;
+        auto start_time = std::chrono::steady_clock::now();
+        while (true) {
+            // Clear screen using proper bounded octal syntax for escape sequences
+            std::cout << "\033[2J\033[H"; // Fixed: bounded octal syntax
+            
+            auto current_time = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
+            
+            std::cout << std::format("=== Live Update Monitor ({}s) ===\n", elapsed.count());
+            ota_manager_.print_device_status();
+            
+            // Check for user input (non-blocking simulation)
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            
+            // Simple break condition
+            if (elapsed.count() > 30) {
+                std::cout << "Monitor timeout reached. Press Enter to continue...";
+                std::cin.ignore();
+                std::cin.get();
+                break;
             }
         }
     }
