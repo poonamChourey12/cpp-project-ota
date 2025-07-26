@@ -36,7 +36,6 @@ struct FirmwareVersion {
     uint32_t patch{0};
     
     constexpr auto operator<=>(const FirmwareVersion& other) const = default;
-    constexpr bool operator==(const FirmwareVersion& other) const = default;
     
     [[nodiscard]] std::string to_string() const {
         return std::format("{}.{}.{}", major, minor, patch);
