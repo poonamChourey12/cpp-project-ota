@@ -750,8 +750,8 @@ private:
         
         auto start_time = std::chrono::steady_clock::now();
         while (true) {
-            // Clear screen using proper bounded syntax for escape sequences
-            std::cout << "\x1B[2J\x1B[H"; // Fixed: bounded syntax with uppercase B
+            // Clear screen using bounded octal escape sequences
+            std::cout << "\033[2J\033[H";
             
             auto current_time = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
