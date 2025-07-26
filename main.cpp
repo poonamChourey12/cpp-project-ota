@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <unordered_map>
 #include <queue>
@@ -16,6 +17,7 @@
 #include <fstream>
 #include <sstream>
 #include <cassert>
+#include <numeric>
 
 namespace ota_simulator {
 
@@ -36,7 +38,6 @@ struct FirmwareVersion {
     uint32_t patch{0};
     
     constexpr auto operator<=>(const FirmwareVersion& other) const = default;
-    constexpr bool operator==(const FirmwareVersion& other) const = default;
     
     [[nodiscard]] std::string to_string() const {
         return std::format("{}.{}.{}", major, minor, patch);
@@ -73,7 +74,7 @@ struct FirmwarePackage {
         data.resize(size);
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_int_distribution<uint8_t> dis(0, 255);
+        std::uniform_int_distribution dis(uint8_t{0}, uint8_t{255}); // Class template argument deduction
         
         std::ranges::generate(data, [&] { return dis(gen); });
         
@@ -115,15 +116,15 @@ public:
         
         DownloadResult result;
         
-        // Simulate network timeout
-        std::uniform_real_distribution<> timeout_dis(0.0, 1.0);
-        if (timeout_dis(rng_) < failure_rate) {
+        // Use init-statement for timeout_dis
+        if (std::uniform_real_distribution timeout_dis(0.0, 1.0); 
+            timeout_dis(rng_) < failure_rate) {
             result.error_message = "Network timeout";
             return result;
         }
         
-        // Simulate download delay
-        std::uniform_int_distribution<> delay_dis(50, 200);
+        // Simulate download delay - Class template argument deduction
+        std::uniform_int_distribution delay_dis(50, 200);
         std::this_thread::sleep_for(std::chrono::milliseconds(delay_dis(rng_)));
         
         size_t start_offset = chunk_index * CHUNK_SIZE;
@@ -144,8 +145,8 @@ public:
         return result;
     }
     
-    [[nodiscard]] static size_t calculate_total_chunks(size_t total_size) {
-        return (total_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    [[nodiscard]] static constexpr size_t calculate_total_chunks(size_t total_size) noexcept {
+        return total_size == 0 ? 0 : (total_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
     }
 };
 
@@ -193,7 +194,7 @@ private:
     std::vector<std::string> update_log_;
     
 public:
-    const uint32_t device_id;
+    const uint32_t device_id{next_id_++}; // In-class initializer
     const DeviceType type;
     const std::string name;
     const double update_speed_factor; // Speed multiplier for this device type
@@ -204,7 +205,7 @@ public:
     std::unique_ptr<FirmwarePackage> staged_firmware;
     
     Device(DeviceType device_type, std::string device_name, FirmwareVersion initial_version)
-        : device_id(next_id_++), type(device_type), name(std::move(device_name)),
+        : type(device_type), name(std::move(device_name)),
           update_speed_factor(get_speed_factor(device_type)),
           current_version(initial_version), previous_version(initial_version) {
         log_event(std::format("Device {} initialized with firmware {}", 
@@ -216,8 +217,13 @@ public:
         auto now = std::chrono::system_clock::now();
         auto time_t = std::chrono::system_clock::to_time_t(now);
         
-        update_log_.push_back(std::format("[{}] {}", 
-            std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S"), event));
+        // Use localtime_r for thread safety
+        struct tm time_buf{};
+        localtime_r(&time_t, &time_buf);
+        
+        update_log_.push_back(std::format("[{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}] {}", 
+            time_buf.tm_year + 1900, time_buf.tm_mon + 1, time_buf.tm_mday,
+            time_buf.tm_hour, time_buf.tm_min, time_buf.tm_sec, event));
         
         // Keep only last 100 log entries
         if (update_log_.size() > 100) {
@@ -272,10 +278,11 @@ public:
     
 private:
     [[nodiscard]] static constexpr double get_speed_factor(DeviceType type) {
+        using enum DeviceType; // Reduce verbosity
         switch (type) {
-            case DeviceType::SENSOR_LOW_POWER: return 0.5;
-            case DeviceType::GATEWAY_HIGH_PERFORMANCE: return 2.0;
-            case DeviceType::ACTUATOR_REAL_TIME: return 1.0;
+            case SENSOR_LOW_POWER: return 0.5;
+            case GATEWAY_HIGH_PERFORMANCE: return 2.0;
+            case ACTUATOR_REAL_TIME: return 1.0;
         }
         return 1.0;
     }
@@ -335,15 +342,16 @@ public:
             return false;
         }
         
-        auto& device = device_it->second;
+        const auto& device = device_it->second; // const reference
         if (!device->can_update_to(target_version)) {
             std::cout << std::format("Error: Cannot update device {} to version {}\n", 
                                    device_id, target_version.to_string());
             return false;
         }
         
-        auto firmware_key = target_version.to_string();
-        if (firmware_repository_.find(firmware_key) == firmware_repository_.end()) {
+        // Use init-statement and contains()
+        if (auto firmware_key = target_version.to_string(); 
+            !firmware_repository_.contains(firmware_key)) {
             std::cout << std::format("Error: Firmware {} not found in repository\n", firmware_key);
             return false;
         }
@@ -366,7 +374,7 @@ public:
             return;
         }
         
-        auto& device = device_it->second;
+        const auto& device = device_it->second; // const reference
         device->rollback();
         device->current_state = UpdateState::ROLLED_BACK;
         
@@ -422,7 +430,7 @@ private:
                 continue;
             }
             
-            auto& device = device_it->second;
+            const auto& device = device_it->second; // const reference
             lock.unlock();
             
             perform_update(*device);
@@ -430,7 +438,9 @@ private:
     }
     
     void perform_update(Device& device) {
-        device.current_state = UpdateState::DOWNLOADING;
+        using enum UpdateState; // Reduce verbosity
+        
+        device.current_state = DOWNLOADING;
         device.log_event("Starting OTA update");
         
         // Find target firmware (assume highest version for simplicity)
@@ -446,43 +456,43 @@ private:
         }
         
         if (!target_firmware) {
-            device.current_state = UpdateState::FAILED;
+            device.current_state = FAILED;
             device.log_event("No suitable firmware found for update");
             return;
         }
         
         // Simulate chunked download with potential failures
         if (!download_firmware_chunked(device, *target_firmware)) {
-            device.current_state = UpdateState::FAILED;
+            device.current_state = FAILED;
             return;
         }
         
         // Verification phase
-        device.current_state = UpdateState::VERIFYING;
+        device.current_state = VERIFYING;
         device.log_event("Verifying downloaded firmware");
         
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         
         if (!device.staged_firmware->verify_integrity()) {
-            device.current_state = UpdateState::FAILED;
+            device.current_state = FAILED;
             device.log_event("Firmware verification failed");
             return;
         }
         
         // Installation phase
-        device.current_state = UpdateState::INSTALLING;
+        device.current_state = INSTALLING;
         device.log_event("Installing firmware");
         
         // Simulate power failure during installation
-        std::uniform_real_distribution<> power_failure_dis(0.0, 1.0);
+        std::uniform_real_distribution power_failure_dis(0.0, 1.0);
         if (power_failure_dis(rng_) < 0.05) { // 5% chance of power failure
-            device.current_state = UpdateState::RECOVERY_MODE;
+            device.current_state = RECOVERY_MODE;
             device.log_event("Power failure during installation - entering recovery mode");
             
             // Simulate recovery process
             std::this_thread::sleep_for(std::chrono::seconds(2));
             device.rollback();
-            device.current_state = UpdateState::ROLLED_BACK;
+            device.current_state = ROLLED_BACK;
             return;
         }
         
@@ -490,16 +500,16 @@ private:
             static_cast<int>(1000 / device.update_speed_factor)));
         
         if (!device.install_staged_firmware()) {
-            device.current_state = UpdateState::FAILED;
+            device.current_state = FAILED;
             return;
         }
         
         // Reboot simulation
-        device.current_state = UpdateState::REBOOTING;
+        device.current_state = REBOOTING;
         device.log_event("Rebooting device");
         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         
-        device.current_state = UpdateState::SUCCESS;
+        device.current_state = SUCCESS;
         device.log_event(std::format("OTA update completed successfully to version {}", 
                                    device.current_version.to_string()));
     }
@@ -551,26 +561,28 @@ private:
     }
     
     [[nodiscard]] static constexpr std::string_view device_type_to_string(DeviceType type) {
+        using enum DeviceType; // Reduce verbosity
         switch (type) {
-            case DeviceType::SENSOR_LOW_POWER: return "Sensor";
-            case DeviceType::GATEWAY_HIGH_PERFORMANCE: return "Gateway";
-            case DeviceType::ACTUATOR_REAL_TIME: return "Actuator";
+            case SENSOR_LOW_POWER: return "Sensor";
+            case GATEWAY_HIGH_PERFORMANCE: return "Gateway";
+            case ACTUATOR_REAL_TIME: return "Actuator";
         }
         return "Unknown";
     }
     
     [[nodiscard]] static constexpr std::string_view update_state_to_string(UpdateState state) {
+        using enum UpdateState; // Reduce verbosity
         switch (state) {
-            case UpdateState::IDLE: return "Idle";
-            case UpdateState::QUEUED: return "Queued";
-            case UpdateState::DOWNLOADING: return "Downloading";
-            case UpdateState::VERIFYING: return "Verifying";
-            case UpdateState::INSTALLING: return "Installing";
-            case UpdateState::REBOOTING: return "Rebooting";
-            case UpdateState::SUCCESS: return "Success";
-            case UpdateState::FAILED: return "Failed";
-            case UpdateState::ROLLED_BACK: return "Rolled Back";
-            case UpdateState::RECOVERY_MODE: return "Recovery";
+            case IDLE: return "Idle";
+            case QUEUED: return "Queued";
+            case DOWNLOADING: return "Downloading";
+            case VERIFYING: return "Verifying";
+            case INSTALLING: return "Installing";
+            case REBOOTING: return "Rebooting";
+            case SUCCESS: return "Success";
+            case FAILED: return "Failed";
+            case ROLLED_BACK: return "Rolled Back";
+            case RECOVERY_MODE: return "Recovery";
         }
         return "Unknown";
     }
@@ -615,7 +627,12 @@ private:
     
     void process_command() {
         int choice;
-        std::cin >> choice;
+        if (!(std::cin >> choice)) {
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            std::cout << "Invalid input. Please try again.\n";
+            return;
+        }
         
         switch (choice) {
             case 1: ota_manager_.print_device_status(); break;
@@ -632,7 +649,12 @@ private:
     void show_device_details() {
         std::cout << "Enter device ID: ";
         uint32_t device_id;
-        std::cin >> device_id;
+        if (!(std::cin >> device_id)) {
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            std::cout << "Invalid device ID.\n";
+            return;
+        }
         
         auto devices = ota_manager_.list_devices();
         auto device_it = std::ranges::find_if(devices, 
@@ -661,20 +683,33 @@ private:
     void queue_update_interactive() {
         std::cout << "Enter device ID: ";
         uint32_t device_id;
-        std::cin >> device_id;
+        if (!(std::cin >> device_id)) {
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            std::cout << "Invalid device ID.\n";
+            return;
+        }
         
         std::cout << "Enter target version (major.minor.patch): ";
         std::string version_str;
-        std::cin >> version_str;
+        if (!(std::cin >> version_str)) {
+            std::cout << "Invalid version format.\n";
+            return;
+        }
         
         auto target_version = FirmwareVersion::parse(version_str);
-        ota_manager_.queue_update(device_id, target_version);
+        [[maybe_unused]] auto result = ota_manager_.queue_update(device_id, target_version);
     }
     
     void rollback_device_interactive() {
         std::cout << "Enter device ID to rollback: ";
         uint32_t device_id;
-        std::cin >> device_id;
+        if (!(std::cin >> device_id)) {
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            std::cout << "Invalid device ID.\n";
+            return;
+        }
         
         ota_manager_.rollback_device(device_id);
     }
@@ -684,8 +719,8 @@ private:
         
         auto start_time = std::chrono::steady_clock::now();
         while (true) {
-            // Clear screen (simplified)
-            std::cout << "\033[2J\033[H";
+            // Clear screen using bounded syntax
+            std::cout << "\x1B[2J\x1B[H";
             
             auto current_time = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
@@ -707,16 +742,18 @@ private:
     }
     
     void add_test_devices() {
+        using enum DeviceType; // Reduce verbosity
+        
         // Add sample devices and firmware for testing
-        auto sensor1 = std::make_unique<Device>(DeviceType::SENSOR_LOW_POWER, 
+        auto sensor1 = std::make_unique<Device>(SENSOR_LOW_POWER, 
                                                "Temperature Sensor 001", 
                                                FirmwareVersion{1, 0, 0});
         
-        auto gateway1 = std::make_unique<Device>(DeviceType::GATEWAY_HIGH_PERFORMANCE,
+        auto gateway1 = std::make_unique<Device>(GATEWAY_HIGH_PERFORMANCE,
                                                 "IoT Gateway Alpha",
                                                 FirmwareVersion{2, 1, 0});
         
-        auto actuator1 = std::make_unique<Device>(DeviceType::ACTUATOR_REAL_TIME,
+        auto actuator1 = std::make_unique<Device>(ACTUATOR_REAL_TIME,
                                                  "Valve Controller 42",
                                                  FirmwareVersion{1, 5, 2});
         
@@ -737,26 +774,28 @@ private:
     }
     
     [[nodiscard]] static constexpr std::string_view device_type_to_string(DeviceType type) {
+        using enum DeviceType; // Reduce verbosity
         switch (type) {
-            case DeviceType::SENSOR_LOW_POWER: return "Low Power Sensor";
-            case DeviceType::GATEWAY_HIGH_PERFORMANCE: return "High Performance Gateway";
-            case DeviceType::ACTUATOR_REAL_TIME: return "Real-Time Actuator";
+            case SENSOR_LOW_POWER: return "Low Power Sensor";
+            case GATEWAY_HIGH_PERFORMANCE: return "High Performance Gateway";
+            case ACTUATOR_REAL_TIME: return "Real-Time Actuator";
         }
         return "Unknown Device Type";
     }
     
     [[nodiscard]] static constexpr std::string_view update_state_to_string(UpdateState state) {
+        using enum UpdateState; // Reduce verbosity
         switch (state) {
-            case UpdateState::IDLE: return "Idle";
-            case UpdateState::QUEUED: return "Queued";
-            case UpdateState::DOWNLOADING: return "Downloading";
-            case UpdateState::VERIFYING: return "Verifying";
-            case UpdateState::INSTALLING: return "Installing";
-            case UpdateState::REBOOTING: return "Rebooting";
-            case UpdateState::SUCCESS: return "Success";
-            case UpdateState::FAILED: return "Failed";
-            case UpdateState::ROLLED_BACK: return "Rolled Back";
-            case UpdateState::RECOVERY_MODE: return "Recovery Mode";
+            case IDLE: return "Idle";
+            case QUEUED: return "Queued";
+            case DOWNLOADING: return "Downloading";
+            case VERIFYING: return "Verifying";
+            case INSTALLING: return "Installing";
+            case REBOOTING: return "Rebooting";
+            case SUCCESS: return "Success";
+            case FAILED: return "Failed";
+            case ROLLED_BACK: return "Rolled Back";
+            case RECOVERY_MODE: return "Recovery Mode";
         }
         return "Unknown State";
     }
