@@ -121,10 +121,6 @@ struct FirmwarePackage {
  * @complexity: Time O(n) where n is number of chunks, Space O(chunk_size)
  */
 class ChunkedDownloader {
-private:
-    static constexpr size_t CHUNK_SIZE = 4096; // 4KB chunks
-    mutable std::mt19937 rng_{std::random_device{}()};
-    
 public:
     struct DownloadResult {
         bool success{false};
@@ -172,6 +168,10 @@ public:
     [[nodiscard]] static constexpr size_t calculate_total_chunks(size_t total_size) noexcept {
         return total_size == 0 ? 0 : (total_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
     }
+
+private:
+    static constexpr size_t CHUNK_SIZE = 4096; // 4KB chunks
+    mutable std::mt19937 rng_{std::random_device{}()};
 };
 
 /**
@@ -539,7 +539,7 @@ private:
                                    device.current_version.to_string()));
     }
     
-    [[nodiscard]] bool download_firmware_chunked(Device& device, const FirmwarePackage& firmware) {
+    [[nodiscard]] bool download_firmware_chunked(Device& device, const FirmwarePackage& firmware) const { // Made const
         device.log_event(std::format("Downloading firmware {} ({} bytes)", 
                                     firmware.version.to_string(), firmware.total_size));
         
@@ -743,8 +743,8 @@ private:
         
         auto start_time = std::chrono::steady_clock::now();
         while (true) {
-            // Clear screen using bounded Unicode syntax
-            std::cout << "\u001B[2J\u001B[H"; // Fixed: bounded syntax
+            // Clear screen using proper bounded syntax for escape sequences
+            std::cout << "\033[2J\033[H"; // Fixed: proper bounded syntax
             
             auto current_time = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
