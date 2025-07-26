@@ -735,32 +735,30 @@ private:
         ota_manager_.rollback_device(device_id);
     }
     
-    void monitor_updates() const { // Made const
-        std::cout << "Monitoring updates (press Enter to stop)...\n";
-        
-        auto start_time = std::chrono::steady_clock::now();
-        while (true) {
-            // Clear screen using proper bounded syntax for escape sequences
-            std::cout << "\x1B[2J\x1B[H"; // Fixed: bounded syntax with uppercase B
-            
-            auto current_time = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
-            
-            std::cout << std::format("=== Live Update Monitor ({}s) ===\n", elapsed.count());
-            ota_manager_.print_device_status();
-            
-            // Check for user input (non-blocking simulation)
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-            
-            // Simple break condition (in real implementation, use non-blocking input)
-            if (elapsed.count() > 30) {
-                std::cout << "Monitor timeout reached. Press Enter to continue...";
-                std::cin.ignore();
-                std::cin.get();
-                break;
-            }
+    void monitor_updates() const { // Now const
+    std::cout << "Monitoring updates (press Enter to stop)...\n";
+    auto start_time = std::chrono::steady_clock::now();
+    while (true) {
+        // Bounded syntax for ESC
+        std::cout << "\x1B[2J\x1B[H";
+
+        auto current_time = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
+
+        std::cout << std::format("=== Live Update Monitor ({}s) ===\n", elapsed.count());
+        ota_manager_.print_device_status();
+
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        if (elapsed.count() > 30) {
+            std::cout << "Monitor timeout reached. Press Enter to continue...";
+            std::cin.ignore();
+            std::cin.get();
+            break;
         }
     }
+}
+
     
     void add_test_devices() const { // Made const
         using enum DeviceType; // Reduce verbosity
