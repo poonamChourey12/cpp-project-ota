@@ -19,6 +19,7 @@
 #include <cassert>
 #include <numeric>
 #include <functional>
+#include <limits>
 
 namespace ota_simulator {
 
@@ -212,7 +213,7 @@ enum class UpdateState {
  */
 class Device {
 public:
-    // Public members grouped together
+    // All public data members grouped together
     const uint32_t device_id{next_id_++}; // In-class initializer
     const DeviceType type;
     const std::string name;
@@ -223,6 +224,7 @@ public:
     FirmwareVersion previous_version; // For rollback
     std::unique_ptr<FirmwarePackage> staged_firmware;
     
+    // All public methods
     Device(DeviceType device_type, std::string device_name, FirmwareVersion initial_version)
         : type(device_type), name(std::move(device_name)),
           update_speed_factor(get_speed_factor(device_type)),
@@ -294,13 +296,14 @@ public:
         log_event(std::format("Rolled back to firmware {}", 
                              current_version.to_string()));
     }
-    
+
 private:
-    // Private members grouped together
+    // All private data members grouped together
     static inline std::atomic<uint32_t> next_id_{1000};
     mutable std::mutex state_mutex_;
     std::vector<std::string> update_log_;
     
+    // All private methods
     [[nodiscard]] static constexpr double get_speed_factor(DeviceType type) {
         using enum DeviceType; // Reduce verbosity
         switch (type) {
@@ -740,8 +743,8 @@ private:
         
         auto start_time = std::chrono::steady_clock::now();
         while (true) {
-            // Clear screen using bounded syntax
-            std::cout << "\u001B[2J\u001B[H"; // Bounded syntax for escape sequences
+            // Clear screen using bounded Unicode syntax
+            std::cout << "\u001B[2J\u001B[H"; // Fixed: bounded syntax
             
             auto current_time = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
